@@ -1,0 +1,105 @@
+' CR1000 - Acquisizione dati EM38 + GPS
+
+'Declare Constants
+Const GPSPort = Com4         'Com port where GPS is connected  
+Const temptime = 5           ' Tempo memorizzazione dati 
+Const tempTableUnits = Sec   ' Unita di tempo memorizzazione  
+
+'Declare Public Variables
+
+Public EM38
+Public GGAstring As String * 500 'gga variables 
+Public RMCstring As String * 500 'rmc variables 
+Public rmclatitude As String 
+Public rmclongitude As String 
+Public rmce_w_indicator As String 
+Public rmcspeed As String 
+Public rmcutcdate As String 
+Public ggautc As String          
+Public ggailatitude As String 
+Public ggae_w_ind As String 
+Public gganumsatellites As String 
+Public ggaaltitude As String 
+Public lat, lon As String
+Public buf1, buf2, buf3
+
+Dim NBytesReturned As Long 
+Dim SubStrings(16) As String * 32, rawdata As String * 500 
+Dim CalculatedChecksum As Long, ReportedChecksum As Long  
+
+'Table definition 
+DataTable (em38gps_utc,True,-1)   
+  DataInterval (0,temptime,Sec,10)   
+  Sample (1,rmcspeed,String)   
+  Sample (1,rmcutcdate,String)   
+  Sample (1,ggautc,String)   
+  Sample (1,ggae_w_ind,String)   
+  Sample (1,ggaaltitude,String)   
+  Sample (1,gganumsatellites,String)   
+  Sample(1,lat,String)
+  Sample(1,lon,String)
+  Sample(1,EM38,IEEE4)
+EndTable 
+
+'Main Program 
+BeginProg   
+  SerialOpen (GPSPort,38400,3,0,1001)   
+  Scan (1,Sec,0,0)    
+
+    VoltDiff(EM38,1,mV2500,1,0,0,_50Hz,1,0)  
+    
+    SerialInRecord (GPSPort,rawdata,36,0,&h0D0A,NBytesReturned,11)     
+    CalculatedChecksum = CheckSum (rawdata,9,Len(rawdata) - 3)     
+    CalculatedChecksum = CalculatedChecksum AND 255     
+    ReportedChecksum = HexToDec(Right(rawdata,2))     
+    If CalculatedChecksum = ReportedChecksum Then       
+      If InStr (1,rawdata,"GPRMC",2) Then         
+        RMCstring = rawdata       
+      ElseIf InStr (1,rawdata,"GPGGA",2) Then         
+        GGAstring = rawdata       
+      EndIf     
+    EndIf    
+    SerialInRecord (GPSPort,rawdata,36,0,&h0D0A,NBytesReturned,11)     
+    CalculatedChecksum = CheckSum (rawdata,9,Len(rawdata) - 3)     
+    CalculatedChecksum = CalculatedChecksum AND 255     
+    ReportedChecksum = HexToDec(Right(rawdata,2))     
+    If CalculatedChecksum = ReportedChecksum Then       
+      If InStr (1,rawdata,"GPRMC",2) Then         
+        RMCstring = rawdata       
+      ElseIf InStr (1,rawdata,"GPGGA",2) Then        
+        GGAstring = rawdata       
+      EndIf     
+    EndIf      
+    SplitStr (SubStrings(),RMCstring,",",16,5) 'parse rmc data        
+    rmclatitude = SubStrings(4)     
+    rmclongitude=SubStrings(6)     
+    rmce_w_indicator=SubStrings(7)     
+    rmcspeed=SubStrings(8)     
+    rmcutcdate=SubStrings(10)     
+   
+    SplitStr (SubStrings(),GGAstring,",",16,5) 'parse gga data         
+    ggautc=SubStrings(2)     
+    ggailatitude=SubStrings(3)     
+    ggae_w_ind=SubStrings(6)     
+    gganumsatellites=SubStrings(8)     
+    ggaaltitude=SubStrings(10)     
+    
+    SplitStr (SubStrings(),rmclatitude,".",2,5) ' Calculate Latidude
+    buf1 = Left(SubStrings(1),2)
+    buf2 = Mid(rmclatitude,3,7)
+    buf3 = buf2/60
+    lat = buf1 + buf3
+    
+    SplitStr (SubStrings(),rmclongitude,".",2,5) ' Calculate Longitude
+    buf1 = Mid(SubStrings(1),2,2)
+    buf2 = Mid(rmclongitude,4,7)
+    buf3 = buf2/60
+    lon = buf1 + buf3
+
+    CallTable em38gps_utc ' Write table
+
+    NextScan
+  
+  SerialClose(GPSPort)
+  
+EndProg
